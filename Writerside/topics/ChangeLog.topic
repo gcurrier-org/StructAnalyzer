@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/xhtml-entities.dtd">
+<topic xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="https://resources.jetbrains.com/writerside/1.0/topic.v2.xsd"
+       title="ChangeLog" id="ChangeLog">
+    
+    <chapter title="Struct Analyzer Project" id="ChangeLog.CommitList">Commit List</chapter>
+    <primary-label ref="Project.Repo"/>
+    <deflist collapsible="true">
+        <def title="2025-03-27T16:12:15Z">
+            <p>Commit: <code>ff6f105ee8bc308cdafee9a9171f2ac766da973a</code></p>
+            <p>Add struct analysis tool and Writerside documentation structure</p>
+            <p>This update introduces the Java-based StructAnalyzer tool, designed to scan C source files for struct
+                definitions and usages, and output results to configurable files. It also adds Writerside configuration
+                files for documentation management and a CLI setup in `build.gradle` to make the application
+                executable.</p>
+        </def>
+    </deflist>
+</topic>
