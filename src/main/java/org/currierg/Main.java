@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
+import org.currierg.generators.PojoGenerator;
 
 public class Main {
     private static final Pattern[] STRUCT_PATTERNS = {
@@ -24,6 +25,8 @@ public class Main {
 
     private final Properties config;
     private final Map<String, StructInfo> structs = new HashMap<>();
+    private final List<StructMatch> structMatches = new ArrayList<>();
+    private final PrintWriter errorWriter;
 
     private static class StructMatch {
         String content;
@@ -37,9 +40,6 @@ public class Main {
         }
     }
 
-    private final List<StructMatch> structMatches = new ArrayList<>();
-    private final PrintWriter errorWriter;
-
     public Main(String configFile) throws IOException {
         this.config = new Properties();
         Path configPath = Paths.get(configFile);
@@ -49,12 +49,9 @@ public class Main {
         try (InputStream is = Files.newInputStream(configPath)) {
             config.load(is);
         }
-        // Initialize error writer from config
-        String errorFilePath = config.getProperty("error.file", "struct_errors.txt");
-        Path errorFile = Paths.get(errorFilePath);
-        if (!errorFile.isAbsolute()) {
-            errorFile = Paths.get(System.getProperty("user.dir")).resolve(errorFilePath);
-        }
+        Path outputDir = Paths.get(config.getProperty("output.dir", System.getProperty("user.dir")));
+        String errorFileName = config.getProperty("error.file", "struct_errors.txt");
+        Path errorFile = outputDir.resolve(errorFileName);
         Files.createDirectories(errorFile.getParent());
         this.errorWriter = new PrintWriter(Files.newBufferedWriter(errorFile), true);
     }
@@ -70,7 +67,7 @@ public class Main {
             }
             writeOutput();
         } finally {
-            errorWriter.close(); // Ensure file is closed
+            errorWriter.close();
         }
     }
 
@@ -185,7 +182,9 @@ public class Main {
     }
 
     private void writeOutput() throws IOException {
-        Path outputFile = Paths.get(config.getProperty("output.file"));
+        Path outputDir = Paths.get(config.getProperty("output.dir"));
+        String outputFileName = config.getProperty("output.file");
+        Path outputFile = outputDir.resolve(outputFileName);
         Files.createDirectories(outputFile.getParent());
 
         // Calculate max lengths for definitions table
@@ -291,10 +290,23 @@ public class Main {
     }
 
     public static void main(String[] args) throws IOException {
-        if (args.length != 1) {
-            System.err.println("Usage: java -jar StructAnalyzer.jar <config.properties>");
+        if (args.length < 1) {
+            System.err.println("Usage: java -jar StructAnalyzer.jar <config.properties> [--generate-classes]");
             System.exit(1);
         }
-        new Main(args[0]).analyze();
+        Main main = new Main(args[0]);
+        if (args.length > 1 && "--generate-classes".equals(args[1])) {
+            Path outputDir = Paths.get(main.config.getProperty("output.dir"));
+            String generatedDirName = main.config.getProperty("generated.dir", "generated");
+            Path generatedDir = outputDir.resolve(generatedDirName);
+            Files.createDirectories(generatedDir);
+            Path structsTablePath = outputDir.resolve(main.config.getProperty("output.file"));
+            String sourceDir = main.config.getProperty("source.dirs").split(",")[0]; // Use first dir for now
+            PojoGenerator generator = new PojoGenerator(generatedDir, structsTablePath, sourceDir);
+            generator.generate();
+        } else {
+            main.analyze();
+        }
     }
+
 }
