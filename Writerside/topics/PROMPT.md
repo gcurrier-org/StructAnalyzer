@@ -24,10 +24,10 @@ empty—no Java files were generated. The build succeeds, so the issue is runtim
 ### Repo Access
 
 The repo is publicly available at: https://github.com/gcurrier-org/StructAnalyzer. Avail yourself of what is there (you
-should be able to read it, even without a PAT)
+should be able to read it, even without a PAT).
 
 <tip>
-    <p>The latest commit: `6b9a32a3d0a20c122a3245b32a63870f1c4b6e3f`</p>
+    <p>The latest commit: `de35120addf5bcb2189e2b6cf7cb2c6d70ce87ca`</p>
     <p>As of: `2025-03-28T09:40:18Z`</p>
 </tip>
 
@@ -52,43 +52,43 @@ Struct Analyzer
             PojoGenerator.java
             pojos/
               UnsignedInt.java
+            utils/
+              AnalysisFileHandler.java
+              AppFileHandler.java
+              GenerateFileHandler.java
+              LogUtil.java
+              PatternsUtil.java
       resources/
         config.properties
+        logging.properties
     test/
       ...
 ```
 
-## Next Steps
-
-1. Debug why `--generate-classes` creates an empty `generated/` directory—check `PojoGenerator` execution flow and
-   inputs.
-2. Push the latest code (with debug prints) to the repo using the PAT.
-3. Address the TODOs below to enhance functionality and robustness.
-
 ### TODOs
 
-1. **Debug Empty Generated Directory**: Investigate why `PojoGenerator.generate()` isn’t producing files (e.g., empty
-   `structs` map, file access issues).
-2. **Handle Multiple source.dirs**: Support comma-separated dirs in `PojoGenerator` by searching all for struct files.
-3. **Dependency Resolution for Nested Structs**: Ensure referenced structs (e.g., `TBereich_177` in `TBereich_200`) are
-   generated or imported correctly.
-4. **Scale to Full Generation**: Remove the top-5 limit in `PojoGenerator.generate()` after subset testing.
-5. **Improve Config Usability**: Add detailed comments to `config.properties` and validate values at runtime.
-6. **More Complete Error Logging**: Replace `PrintWriter errorWriter` with a logger (e.g., `java.util.logging`) in
-   `Main`, usable across classes.
-7. **Log Output for Errors**: Log errors to file and console, rethinking `errorWriter` usage.
-8. **Update Help Text for Command-Line Arguments**: Enhance usage message with mode details and examples, consider
-   `--help` flag.
+1. **build.gradle adjustment** configure the build.gradle to move the .properties files from the resources directory
+2. **debug runs** configuration for running in debug mode in IntelliJ Ultimate (doesn't read from resource bundle
+   directory)
+3. **Pojo generation** is working "kind of" - needs investigation.
+4. **GitHub workflow** will be useful for auto generating gists (with some customized code), as well as release
+   management, and commit hash and date tracking in GitHub.
 
 ## Instructions
 
 - You have explicit permission to utilize the GitHub repo given above within the scope of this project.
+- Refer to the commit hash given and review the project - do not assume or imagine what you THINK the code might be...
+  read it and KNOW what the code IS. Thereafter, you may keep track of it until such time as I announce the next push,
+  after which you will repeat the process of reading the current state fo the repo and continuing.
 - When providing generated code, whole-file output is not necessary. Provide only the file name, the
   function/method/other part name of where changes are to be applied. If changes are partial within a
   function/method/other object, simply provide two or three pre- and pro-ceeding lines to help indicate where the
   changed code should be placed. This keeps your output to a minimum... lean and quick.
+- Form follows function. Instead of giant monolothic classes (this is a java project), seek to of object orientation and
+  reusability where possible.
 - Do not assume to know how a particular class is defined or what it looks like. If you don't know, say it, ask for it.
-  I will provide it.
+  I will provide it if you are unable to read from the repository. Again, do not assume the code's structure and layout
+  unless you are already tracking changes.
 - Be direct and honest. I am not always right and expect constructive criticism when something should be changed due to
   errors, false assumptions, lack of knowledge, etc. In turn, if I decide to override a suggestion, I will try to
   provide my reasoning. I expect the same.

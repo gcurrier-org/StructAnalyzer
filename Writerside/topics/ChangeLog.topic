@@ -8,9 +8,8 @@
     <chapter title="Struct Analyzer Project" id="ChangeLog.CommitList">Commit List</chapter>
     <primary-label ref="Project.Repo"/>
     <deflist collapsible="true">
-        <def title="--">
-            <p>Commit: <code>--</code></p>
-            <p>Refactor and modularize logging and pattern utilities</p>
+        <def title="2025-03-28T14:21:03Z - Refactor and modularize logging and pattern utilities">
+            <p>Commit: <code>de35120addf5bcb2189e2b6cf7cb2c6d70ce87ca </code></p>
             <list>
                 <li>Extracted regex patterns and logging functionalities into separate utility classes (`PatternsUtil`
                     and `LogUtil`) to improve code modularity and maintainability.
@@ -21,23 +20,31 @@
         </def>
     </deflist>
     <deflist collapsible="true">
-        <def title="2025-03-28T09:40:18Z">
+        <def title="2025-03-28T09:40:18Z - Add class generation functionality and refactor file handling">
             <p>Commit: <code>6b9a32a3d0a20c122a3245b32a63870f1c4b6e3f</code></p>
-            <p>Add class generation functionality and refactor file handling</p>
-            <p>Introduces a `PojoGenerator` to generate Java classes (`POJOs`) from C struct definitions, supporting the
-                new `--generate-classes` mode for `StructAnalyzer`. Refactors configuration handling to streamline
-                output directory and file management, and adds a new `UnsignedInt` class. Updates `config.properties` to
-                support better organization and dynamic path management.</p>
+            <list>
+                <li>Introduces a `PojoGenerator` to generate Java classes (`POJOs`) from C struct definitions,
+                    supporting the new `--generate-classes` mode for `StructAnalyzer`.
+                </li>
+                <li>Refactors configuration handling to streamline output directory and file management, and adds a new
+                    `UnsignedInt` class.
+                </li>
+                <li>Updates `config.properties` to support better organization and dynamic path management.
+                </li>
+            </list>
         </def>
     </deflist>
     <deflist collapsible="true">
-        <def title="2025-03-27T16:12:15Z">
+        <def title="2025-03-27T16:12:15Z - Add struct analysis tool and Writerside documentation structure">
             <p>Commit: <code>ff6f105ee8bc308cdafee9a9171f2ac766da973a</code></p>
-            <p>Add struct analysis tool and Writerside documentation structure</p>
-            <p>This update introduces the Java-based StructAnalyzer tool, designed to scan C source files for struct
-                definitions and usages, and output results to configurable files. It also adds Writerside configuration
-                files for documentation management and a CLI setup in `build.gradle` to make the application
-                executable.</p>
+            <list>
+                <li>This update introduces the Java-based StructAnalyzer tool, designed to scan C source files for
+                    struct definitions and usages, and output results to configurable files.
+                </li>
+                <li>It also adds Writerside configuration files for documentation management and a CLI setup in
+                    `build.gradle` to make the application executable.
+                </li>
+            </list>
         </def>
     </deflist>
 </topic>

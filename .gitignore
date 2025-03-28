@@ -40,6 +40,9 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Mine ###
+/Writerside/topics/PROMPT.md
 /TestDir/properties/config.properties
 /TestDir/properties/logging.properties
 /TestDir/StructAnalyzer.jar
