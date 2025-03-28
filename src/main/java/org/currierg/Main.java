@@ -27,50 +27,69 @@ public class Main {
     private final boolean testMode;
 
     static {
-        // Static block will be updated in constructor to use baseOutputDir
+        Logger.getLogger("").addHandler(new ConsoleHandler());
+        LOGGER.setLevel(Level.INFO);
     }
 
-    public Main(Properties config, boolean testMode) throws IOException {
-        this.config = config;
+    public Main(boolean testMode) throws IOException {
         this.testMode = testMode;
-        this.baseOutputDir = testMode ? Paths.get("TestDir") : Paths.get("SAOut");
+        // Get JAR's directory as base in test mode
+        Path jarPath;
+        try {
+            jarPath = Paths.get(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent();
+        } catch (Exception e) {
+            throw new IOException("Failed to determine JAR location: " + e.getMessage(), e);
+        }
+        this.baseOutputDir = testMode ? jarPath.toAbsolutePath() : Paths.get("SAOut").toAbsolutePath();
+        LOG.info("Base output dir: " + baseOutputDir);
         Files.createDirectories(baseOutputDir);
 
-        // Load logging configuration
-        try {
-            File logConfigFile = baseOutputDir.resolve("properties/logging.properties").toFile();
-            if (logConfigFile.exists()) {
-                try (FileInputStream fis = new FileInputStream(logConfigFile)) {
-                    LogManager.getLogManager().readConfiguration(fis);
-                }
-            } else {
-                System.err.println("Warning: " + logConfigFile.getPath() + " not found");
-                Logger.getLogger("").addHandler(new ConsoleHandler());
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to load logging.properties: " + e.getMessage());
-        }
-
-        updateLoggingPaths();
+        Path propsDir = baseOutputDir.resolve("properties");
+        LOG.info("Using properties dir: " + propsDir.toAbsolutePath());
+        setupLogging(propsDir);
+        this.config = loadPropertiesFromDir(propsDir, "config.properties");
     }
 
-    private void updateLoggingPaths() throws IOException {
+    private Properties loadPropertiesFromDir(Path dir, String fileName) throws IOException {
+        Properties props = new Properties();
+        Path filePath = dir.resolve(fileName);
+        LOG.info("Attempting to load " + fileName + " from: " + filePath.toAbsolutePath());
+        if (!Files.exists(filePath)) {
+            throw new FileNotFoundException("Required properties file not found: " + filePath);
+        }
+        try (InputStream input = Files.newInputStream(filePath)) {
+            props.load(input);
+            LOG.info("Loaded " + fileName + " from: " + filePath.toAbsolutePath());
+        }
+        return props;
+    }
+
+    private void setupLogging(Path propsDir) throws IOException {
+        Path logConfigFile = propsDir.resolve("logging.properties");
         String logDir = baseOutputDir.resolve("logs").toString();
         Files.createDirectories(Paths.get(logDir));
+
         Properties logProps = new Properties();
-        File logConfigFile = baseOutputDir.resolve("properties/logging.properties").toFile();
-        if (logConfigFile.exists()) {
-            try (FileInputStream fis = new FileInputStream(logConfigFile)) {
+        if (Files.exists(logConfigFile)) {
+            try (FileInputStream fis = new FileInputStream(logConfigFile.toFile())) {
                 logProps.load(fis);
+                LOG.info("Loaded logging config from: " + logConfigFile.toAbsolutePath());
             }
+        } else {
+            LOG.warning(logConfigFile.toAbsolutePath() + " not found, using default console logging");
         }
+
+        logProps.setProperty("java.util.logging.FileHandler.pattern", logDir + "/app.log");
         logProps.setProperty("org.currierg.util.AppFileHandler.pattern", logDir + "/app.log");
         logProps.setProperty("org.currierg.util.AnalysisFileHandler.pattern", logDir + "/analysis.log");
         logProps.setProperty("org.currierg.util.GenerateFileHandler.pattern", logDir + "/generate.log");
+
+        LogManager.getLogManager().reset();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             logProps.store(baos, null);
             LogManager.getLogManager().readConfiguration(new ByteArrayInputStream(baos.toByteArray()));
         }
+
         String logLevel = System.getProperty("logLevel");
         if (logLevel != null) {
             Level level = Level.parse(logLevel.toUpperCase());
@@ -85,16 +104,8 @@ public class Main {
 
     public static void main(String[] args) {
         try {
-            if (args.length < 1) {
-                throw new IllegalArgumentException("Missing config file argument");
-            }
             boolean testMode = Arrays.asList(args).contains("--test-mode");
-            LOG.info("Loading config from: " + args[0]);
-            Properties config = loadConfig(args[0]);
-            if (config == null || config.isEmpty()) {
-                throw new IllegalStateException("Config is null or empty");
-            }
-            Main main = new Main(config, testMode);
+            Main main = new Main(testMode);
             if (Arrays.asList(args).contains("--generate-classes")) {
                 LOG.info("Starting class generation mode");
                 main.generateClasses();

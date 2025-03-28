@@ -29,7 +29,6 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
-// Disable standard jar task since shadowJar replaces it
 jar {
     enabled = false
     manifest {
@@ -38,14 +37,12 @@ jar {
     archiveFileName = 'StructAnalyzer.jar'
 }
 
-// ShadowJar creates the standalone JAR with dependencies
 shadowJar {
     archiveFileName = 'StructAnalyzer.jar'
     mergeServiceFiles()
     dependsOn 'classes'
 }
 
-// Make application plugin tasks depend on shadowJar instead of jar
 tasks.named('startScripts') {
     dependsOn shadowJar
 }
@@ -54,45 +51,44 @@ tasks.named('distTar') {
     dependsOn shadowJar
 }
 
-// Task to copy JAR and properties to TestDir/ for test mode
 tasks.register('copyToTestDir') {
     group = 'build'
-    description = 'Copies StructAnalyzer.jar, config.properties, and logging.properties to TestDir/ for test mode'
+    description = 'Copies StructAnalyzer.jar, and in test mode, config.properties and logging.properties from resources to TestDir/'
     dependsOn shadowJar
-
     doLast {
-        // Ensure TestDir and properties subdirectory exist
         def testDir = file('TestDir')
         def propertiesDir = file('TestDir/properties')
         testDir.mkdirs()
         propertiesDir.mkdirs()
 
-        // Copy JAR to TestDir/
+        // Always copy the JAR
         copy {
             from 'build/libs/StructAnalyzer.jar'
             into testDir
         }
 
-        // Copy config.properties to TestDir/properties/
-        copy {
-            from 'config.properties'
-            into propertiesDir
-        }
-
-        // Copy logging.properties to TestDir/properties/
-        copy {
-            from 'logging.properties'
-            into propertiesDir
+        // Copy .properties from src/main/resources/ only in test mode
+        if (project.hasProperty('testMode')) {
+            copy {
+                from 'src/main/resources/config.properties'
+                into propertiesDir
+            }
+            copy {
+                from 'src/main/resources/logging.properties'
+                into propertiesDir
+            }
+            println "Copied config.properties and logging.properties from src/main/resources/ to TestDir/properties/ for test mode"
+        } else {
+            println "Skipped copying .properties files (not in test mode)"
         }
     }
 }
 
-// Task to package the deployment structure into a zip archive
+// [Keeping packageDeployment as-is for now, since it’s not test-mode specific]
 tasks.register('packageDeployment', Zip) {
     group = 'distribution'
     description = 'Packages the deployment structure into a zip archive with SAOut/ as the root'
     dependsOn shadowJar
-
     from('build/libs/StructAnalyzer.jar') {
         into 'SAOut'
     }
@@ -106,12 +102,10 @@ tasks.register('packageDeployment', Zip) {
     destinationDirectory = file('build/distributions')
 }
 
-// Hook packageDeployment into distZip
 tasks.named('distZip') {
     dependsOn packageDeployment
 }
 
-// Hook only copyToTestDir into build
 build {
     dependsOn copyToTestDir
 }
