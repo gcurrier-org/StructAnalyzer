@@ -1,6 +1,7 @@
 plugins {
     id 'java'
-    id 'application'  // For CLI app
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'org.currierg'
@@ -11,27 +12,120 @@ repositories {
 }
 
 dependencies {
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
 
 application {
-    mainClass = 'org.currierg.Main'  // CLI entry point
+    mainClass = 'org.currierg.Main'
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)  // Java 17 explicit
+        languageVersion = JavaLanguageVersion.of(17)
     }
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
+// Disable standard jar task since shadowJar replaces it
 jar {
+    enabled = false
     manifest {
         attributes 'Main-Class': 'org.currierg.Main'
     }
     archiveFileName = 'StructAnalyzer.jar'
 }
 
+// ShadowJar creates the standalone JAR with dependencies
+shadowJar {
+    archiveFileName = 'StructAnalyzer.jar'
+    mergeServiceFiles()
+    dependsOn 'classes'
+}
+
+// Make application plugin tasks depend on shadowJar instead of jar
+tasks.named('startScripts') {
+    dependsOn shadowJar
+}
+
+tasks.named('distTar') {
+    dependsOn shadowJar
+}
+
+// Task to copy JAR and properties to TestDir/ for test mode
+tasks.register('copyToTestDir') {
+    group = 'build'
+    description = 'Copies StructAnalyzer.jar, config.properties, and logging.properties to TestDir/ for test mode'
+    dependsOn shadowJar
+
+    doLast {
+        // Ensure TestDir and properties subdirectory exist
+        def testDir = file('TestDir')
+        def propertiesDir = file('TestDir/properties')
+        testDir.mkdirs()
+        propertiesDir.mkdirs()
+
+        // Copy JAR to TestDir/
+        copy {
+            from 'build/libs/StructAnalyzer.jar'
+            into testDir
+        }
+
+        // Copy config.properties to TestDir/properties/
+        copy {
+            from 'config.properties'
+            into propertiesDir
+        }
+
+        // Copy logging.properties to TestDir/properties/
+        copy {
+            from 'logging.properties'
+            into propertiesDir
+        }
+    }
+}
+
+// Task to package the deployment structure into a zip archive
+tasks.register('packageDeployment', Zip) {
+    group = 'distribution'
+    description = 'Packages the deployment structure into a zip archive with SAOut/ as the root'
+    dependsOn shadowJar
+
+    from('build/libs/StructAnalyzer.jar') {
+        into 'SAOut'
+    }
+    from('config.properties') {
+        into 'SAOut/properties'
+    }
+    from('logging.properties') {
+        into 'SAOut/properties'
+    }
+    archiveFileName = 'StructAnalyzer-deployment.zip'
+    destinationDirectory = file('build/distributions')
+}
+
+// Hook packageDeployment into distZip
+tasks.named('distZip') {
+    dependsOn packageDeployment
+}
+
+// Hook only copyToTestDir into build
+build {
+    dependsOn copyToTestDir
+}
+
 test {
     useJUnitPlatform()
+}
+
+tasks.register('runMain', JavaExec) {
+    group = 'application'
+    description = 'Runs the Main class with arguments (for local testing)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.currierg.Main'
+    if (project.hasProperty('args')) {
+        args project.property('args').split('\\s+')
+    }
 }

@@ -1,74 +1,163 @@
 package org.currierg;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.*;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import java.util.logging.*;
 import java.util.regex.*;
+
 import org.currierg.generators.PojoGenerator;
+import org.currierg.util.LogUtil;
+import org.currierg.util.PatternsUtil;
 
 public class Main {
-    private static final Pattern[] STRUCT_PATTERNS = {
-            Pattern.compile("struct\\s+(\\w+)\\s*\\{[^}]*\\}", Pattern.DOTALL), // Tag with body
-            Pattern.compile("typedef\\s+struct\\s*(?:(\\w+)\\s*)?\\{[^}]*\\}\\s*(\\w+);", Pattern.DOTALL), // Typedef with optional tag
-            Pattern.compile("#pragma\\s+pack\\s*\\(\\d+\\)\\s*struct\\s+(\\w+)\\s*\\{[^}]*\\}", Pattern.DOTALL), // Packed
-            Pattern.compile("struct\\s+(\\w+)\\s*;", Pattern.DOTALL), // Forward declaration
-    };
-
-    private static final Pattern USAGE_PATTERN = Pattern.compile(
-            "(?:struct\\s+)?(\\w+)\\s*(?:\\*|\\s+)\\w+\\s*(?:\\[\\d*\\])?\\s*[;,]|" +
-                    "(?:struct\\s+)?(\\w+)\\s*\\w+\\s*=\\s*\\{"
-    );
-    private static final Pattern COMMENT_PATTERN = Pattern.compile(
-            "(//.*?$)|(/\\*[^*]*\\*+([^/*][^*]*\\*+)*/)", Pattern.MULTILINE);
+    private static final Logger LOGGER = Logger.getLogger("org.currierg.Main");
+    private static final Logger ANALYSIS_LOGGER = Logger.getLogger("org.currierg.Analysis");
+    private static final LogUtil LOG = new LogUtil(LOGGER);
+    private static final LogUtil ANALYSIS_LOG = new LogUtil(ANALYSIS_LOGGER);
 
     private final Properties config;
     private final Map<String, StructInfo> structs = new HashMap<>();
     private final List<StructMatch> structMatches = new ArrayList<>();
-    private final PrintWriter errorWriter;
+    private final Path baseOutputDir;
+    private final boolean testMode;
 
-    private static class StructMatch {
-        String content;
-        Path file;
-        int start;
-
-        StructMatch(String content, Path file, int start) {
-            this.content = content;
-            this.file = file;
-            this.start = start;
-        }
+    static {
+        // Static block will be updated in constructor to use baseOutputDir
     }
 
-    public Main(String configFile) throws IOException {
-        this.config = new Properties();
-        Path configPath = Paths.get(configFile);
-        if (!Files.exists(configPath)) {
-            throw new FileNotFoundException("Config file not found: " + configFile);
-        }
-        try (InputStream is = Files.newInputStream(configPath)) {
-            config.load(is);
-        }
-        Path outputDir = Paths.get(config.getProperty("output.dir", System.getProperty("user.dir")));
-        String errorFileName = config.getProperty("error.file", "struct_errors.txt");
-        Path errorFile = outputDir.resolve(errorFileName);
-        Files.createDirectories(errorFile.getParent());
-        this.errorWriter = new PrintWriter(Files.newBufferedWriter(errorFile), true);
-    }
+    public Main(Properties config, boolean testMode) throws IOException {
+        this.config = config;
+        this.testMode = testMode;
+        this.baseOutputDir = testMode ? Paths.get("TestDir") : Paths.get("SAOut");
+        Files.createDirectories(baseOutputDir);
 
-    public void analyze() throws IOException {
+        // Load logging configuration
         try {
-            String[] sourceDirs = config.getProperty("source.dirs").split(",");
-            for (String dir : sourceDirs) {
-                Files.walk(Paths.get(dir.trim()))
-                        .filter(Files::isRegularFile)
-                        .filter(p -> p.toString().endsWith(".c") || p.toString().endsWith(".h"))
-                        .forEach(this::processFile);
+            File logConfigFile = baseOutputDir.resolve("properties/logging.properties").toFile();
+            if (logConfigFile.exists()) {
+                try (FileInputStream fis = new FileInputStream(logConfigFile)) {
+                    LogManager.getLogManager().readConfiguration(fis);
+                }
+            } else {
+                System.err.println("Warning: " + logConfigFile.getPath() + " not found");
+                Logger.getLogger("").addHandler(new ConsoleHandler());
             }
-            writeOutput();
-        } finally {
-            errorWriter.close();
+        } catch (IOException e) {
+            System.err.println("Failed to load logging.properties: " + e.getMessage());
         }
+
+        updateLoggingPaths();
+    }
+
+    private void updateLoggingPaths() throws IOException {
+        String logDir = baseOutputDir.resolve("logs").toString();
+        Files.createDirectories(Paths.get(logDir));
+        Properties logProps = new Properties();
+        File logConfigFile = baseOutputDir.resolve("properties/logging.properties").toFile();
+        if (logConfigFile.exists()) {
+            try (FileInputStream fis = new FileInputStream(logConfigFile)) {
+                logProps.load(fis);
+            }
+        }
+        logProps.setProperty("org.currierg.util.AppFileHandler.pattern", logDir + "/app.log");
+        logProps.setProperty("org.currierg.util.AnalysisFileHandler.pattern", logDir + "/analysis.log");
+        logProps.setProperty("org.currierg.util.GenerateFileHandler.pattern", logDir + "/generate.log");
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            logProps.store(baos, null);
+            LogManager.getLogManager().readConfiguration(new ByteArrayInputStream(baos.toByteArray()));
+        }
+        String logLevel = System.getProperty("logLevel");
+        if (logLevel != null) {
+            Level level = Level.parse(logLevel.toUpperCase());
+            Logger.getLogger("org.currierg.Main").setLevel(level);
+            Logger.getLogger("org.currierg.Analysis").setLevel(level);
+            Logger.getLogger("org.currierg.Generator").setLevel(level);
+            for (Handler handler : LogManager.getLogManager().getLogger("").getHandlers()) {
+                handler.setLevel(level);
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        try {
+            if (args.length < 1) {
+                throw new IllegalArgumentException("Missing config file argument");
+            }
+            boolean testMode = Arrays.asList(args).contains("--test-mode");
+            LOG.info("Loading config from: " + args[0]);
+            Properties config = loadConfig(args[0]);
+            if (config == null || config.isEmpty()) {
+                throw new IllegalStateException("Config is null or empty");
+            }
+            Main main = new Main(config, testMode);
+            if (Arrays.asList(args).contains("--generate-classes")) {
+                LOG.info("Starting class generation mode");
+                main.generateClasses();
+            } else {
+                LOG.info("Starting analysis mode");
+                main.analyze();
+            }
+        } catch (Exception e) {
+            LOG.severe("Error in main: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private static Properties loadConfig(String configPath) throws IOException {
+        Properties config = new Properties();
+        Path path = Paths.get(configPath);
+        if (!Files.exists(path)) {
+            throw new FileNotFoundException("Config file not found: " + configPath);
+        }
+        try (InputStream input = Files.newInputStream(path)) {
+            config.load(input);
+        }
+        return config;
+    }
+
+    private void analyze() throws IOException {
+        String sourceDir = config.getProperty("source.dirs");
+        if (sourceDir == null || sourceDir.trim().isEmpty()) {
+            throw new IllegalArgumentException("source.dirs is not specified in config");
+        }
+        String includePattern = config.getProperty("include.pattern", "**/*.{c,h}");
+        String excludePattern = config.getProperty("exclude.pattern", "");
+
+        ANALYSIS_LOG.info("Analyzing source directory: " + sourceDir);
+        Path sourcePath = Paths.get(sourceDir);
+        List<Path> files = new ArrayList<>();
+        FileVisitor<Path> visitor = new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+                if (Files.isRegularFile(file) && matchesPattern(file, sourcePath, includePattern) && !matchesPattern(file, sourcePath, excludePattern)) {
+                    files.add(file);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        };
+        Files.walkFileTree(sourcePath, visitor);
+
+        ANALYSIS_LOG.info("Found " + files.size() + " files to process");
+        for (Path file : files) {
+            processFile(file);
+        }
+
+        writeJsonOutput();
+        writeTxtOutput();
+    }
+
+    private boolean matchesPattern(Path file, Path baseDir, String pattern) {
+        if (pattern.isEmpty()) return false;
+        Path relativePath = baseDir.relativize(file);
+        return FileSystems.getDefault()
+                .getPathMatcher("glob:" + pattern)
+                .matches(relativePath);
     }
 
     private void processFile(Path file) {
@@ -81,26 +170,17 @@ public class Main {
             }
 
             String content = String.join("\n", lines);
-            String cleanContent = COMMENT_PATTERN.matcher(content).replaceAll("");
+            String cleanContent = PatternsUtil.COMMENT_REMOVAL_PATTERN.matcher(content).replaceAll("");
 
-            // Pass 1: Collect all struct-like matches
-            Pattern broadStructPattern = Pattern.compile(
-                    "(typedef\\s+struct\\s*(?:\\w+\\s*)?\\{[^}]*\\}\\s*\\w+;)|" +
-                            "(struct\\s+\\w+\\s*\\{[^}]*\\})|" +
-                            "(#pragma\\s+pack\\s*\\(\\d+\\)\\s*struct\\s+\\w+\\s*\\{[^}]*\\})|" +
-                            "(struct\\s+\\w+\\s*;)",
-                    Pattern.DOTALL
-            );
-            Matcher matcher = broadStructPattern.matcher(cleanContent);
+            Matcher matcher = PatternsUtil.BROAD_STRUCT_PATTERN.matcher(cleanContent);
             while (matcher.find()) {
                 structMatches.add(new StructMatch(matcher.group(0), file, matcher.start()));
             }
 
-            // Pass 2: Extract names from matches
-            Pattern typedefPattern = Pattern.compile("typedef\\s+struct\\s*(?:(\\w+)\\s*)?\\{[^}]*\\}\\s*(\\w+);", Pattern.DOTALL);
-            Pattern tagPattern = Pattern.compile("struct\\s+(\\w+)\\s*\\{[^}]*\\}", Pattern.DOTALL);
-            Pattern pragmaPattern = Pattern.compile("#pragma\\s+pack\\s*\\(\\d+\\)\\s*struct\\s+(\\w+)\\s*\\{[^}]*\\}", Pattern.DOTALL);
-            Pattern forwardPattern = Pattern.compile("struct\\s+(\\w+)\\s*;", Pattern.DOTALL);
+            Pattern typedefPattern = PatternsUtil.TYPEDEF_STRUCT_PATTERN;
+            Pattern tagPattern = PatternsUtil.BASIC_STRUCT_PATTERN;
+            Pattern pragmaPattern = PatternsUtil.PRAGMA_STRUCT_PATTERN;
+            Pattern forwardPattern = PatternsUtil.FORWARD_STRUCT_PATTERN;
 
             for (StructMatch match : structMatches) {
                 String name = null;
@@ -132,18 +212,12 @@ public class Main {
                     String location = getShortPath(file) + ":" + lineNum;
                     structs.computeIfAbsent(finalName, k -> new StructInfo(k)).addDefinition(location);
                 } else {
-                    errorWriter.println("File: " + match.file);
-                    errorWriter.println("Invalid struct match: " + match.content);
-                    errorWriter.println("---");
+                    ANALYSIS_LOG.warning("File: " + file + "\nInvalid struct match: " + match.content + "\n---");
+                    writeError("Invalid struct match in " + file + ": " + match.content);
                 }
             }
 
-            // Pass 3: Find usages
-            Pattern usagePattern = Pattern.compile(
-                    "(?:struct\\s+)?(\\w+)\\s*(?:\\*|\\s+)\\w+\\s*(?:\\[\\d*\\])?\\s*[;,]|" +
-                            "(?:struct\\s+)?(\\w+)\\s*\\w+\\s*=\\s*\\{"
-            );
-            Matcher useMatcher = usagePattern.matcher(cleanContent);
+            Matcher useMatcher = PatternsUtil.STRUCT_USAGE_PATTERN.matcher(cleanContent);
             while (useMatcher.find()) {
                 String name = null;
                 for (int i = 1; i <= useMatcher.groupCount(); i++) {
@@ -159,154 +233,169 @@ public class Main {
                 }
             }
         } catch (IOException e) {
-            errorWriter.println("File: " + file);
-            errorWriter.println("Skipped due to IO Error: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            errorWriter.println("---");
-        } finally {
-            errorWriter.flush();
+            ANALYSIS_LOG.warning("File: " + file + "\nSkipped due to IO Error: " + e.getClass().getSimpleName() + " - " + e.getMessage() + "\n---");
+            writeError("IO Error processing " + file + ": " + e.getMessage());
         }
     }
 
     private String getShortPath(Path file) {
-        Path parent = file.getParent().getFileName();
-        return parent != null ? parent + "/" + file.getFileName() : file.getFileName().toString();
+        return Paths.get(config.getProperty("source.dirs")).relativize(file).toString().replace('\\', '/');
     }
 
-    private int getLineNumber(List<String> lines, int charPos) {
-        int pos = 0;
-        for (int i = 0; i < lines.size(); i++) {
-            pos += lines.get(i).length() + 1;
-            if (pos > charPos) return i + 1;
+    private int getLineNumber(List<String> lines, int charPosition) {
+        int lineNum = 1;
+        int currentPos = 0;
+        for (String line : lines) {
+            currentPos += line.length() + 1;
+            if (currentPos > charPosition) {
+                return lineNum;
+            }
+            lineNum++;
         }
-        return lines.size();
+        return lineNum;
     }
 
-    private void writeOutput() throws IOException {
-        Path outputDir = Paths.get(config.getProperty("output.dir"));
-        String outputFileName = config.getProperty("output.file");
-        Path outputFile = outputDir.resolve(outputFileName);
+    private void writeJsonOutput() throws IOException {
+        String outputPath = config.getProperty("output.json");
+        if (outputPath == null || outputPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("output.json is not specified in config");
+        }
+        Path outputFile = baseOutputDir.resolve(outputPath);
         Files.createDirectories(outputFile.getParent());
+        Files.deleteIfExists(outputFile);
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, List<Map<String, Object>>> output = new HashMap<>();
+        List<Map<String, Object>> definitions = new ArrayList<>();
 
-        // Calculate max lengths for definitions table
-        int maxNameDef = "Struct Name".length();
-        int maxCountDef = "Count".length();
-        int maxFilesDef = "Definition Files".length();
-        for (StructInfo info : structs.values()) {
-            if (info.getDefinitions() > 0) {
-                maxNameDef = Math.max(maxNameDef, info.getName().length());
-                maxCountDef = Math.max(maxCountDef, String.valueOf(info.getDefinitions()).length());
-                maxFilesDef = Math.max(maxFilesDef, String.join(",", info.getDefinitionFiles()).length());
-            }
+        for (StructInfo struct : structs.values()) {
+            Map<String, Object> def = new HashMap<>();
+            def.put("name", struct.name);
+            def.put("count", struct.definitions.size() + struct.usages.size());
+            def.put("definitionFiles", struct.definitions);
+            def.put("usageFiles", struct.usages);
+            definitions.add(def);
         }
 
-        // Calculate max lengths for usages table
-        int maxNameUse = "Struct Name".length();
-        int maxCountUse = "Count".length();
-        int maxFilesUse = "Usage Files".length();
-        for (StructInfo info : structs.values()) {
-            if (info.getUsages() > 0) {
-                maxNameUse = Math.max(maxNameUse, info.getName().length());
-                maxCountUse = Math.max(maxCountUse, String.valueOf(info.getUsages()).length());
-                maxFilesUse = Math.max(maxFilesUse, String.join(",", info.getUsageFiles()).length());
+        output.put("definitions", definitions);
+        try (Writer writer = Files.newBufferedWriter(outputFile)) {
+            mapper.writerWithDefaultPrettyPrinter().writeValue(writer, output);
+        }
+        ANALYSIS_LOG.info("Wrote JSON output to " + outputFile);
+    }
+
+    private void writeTxtOutput() throws IOException {
+        String outputPath = config.getProperty("output.file");
+        if (outputPath == null || outputPath.trim().isEmpty()) {
+            ANALYSIS_LOG.warning("output.file not specified in config, skipping TXT output");
+            return;
+        }
+        Path outputFile = baseOutputDir.resolve(outputPath);
+        Files.createDirectories(outputFile.getParent());
+        Files.deleteIfExists(outputFile);
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputFile))) {
+            writer.println("Struct Analysis Report");
+            writer.println("=====================");
+            for (StructInfo struct : structs.values()) {
+                writer.println("Struct: " + struct.name);
+                writer.println("Total References: " + (struct.definitions.size() + struct.usages.size()));
+                writer.println("Definitions: " + struct.definitions);
+                writer.println("Usages: " + struct.usages);
+                writer.println("---------------------");
             }
         }
+        ANALYSIS_LOG.info("Wrote TXT output to " + outputFile);
+    }
 
-        // Format strings with padding and tab separation
-        String defFormat = "%-" + maxNameDef + "s\t%-" + maxCountDef + "s\t%-" + maxFilesDef + "s";
-        String useFormat = "%-" + maxNameUse + "s\t%-" + maxCountUse + "s\t%-" + maxFilesUse + "s";
-
-        try (BufferedWriter writer = Files.newBufferedWriter(outputFile)) {
-            // Definitions Table
-            writer.write(String.format(defFormat, "Struct Name", "Count", "Definition Files"));
-            writer.write("\n" + "-".repeat(maxNameDef) + "\t" + "-".repeat(maxCountDef) + "\t" + "-".repeat(maxFilesDef));
-            for (StructInfo info : structs.values().stream()
-                    .filter(info -> info.getDefinitions() > 0)
-                    .sorted(Comparator.comparing(StructInfo::getName))
-                    .toList()) {
-                writer.write("\n" + String.format(defFormat,
-                        info.getName(), info.getDefinitions(),
-                        String.join(",", info.getDefinitionFiles())));
-            }
-
-            // Separator
-            writer.write("\n\n\n");
-
-            // Usages Table
-            writer.write(String.format(useFormat, "Struct Name", "Count", "Usage Files"));
-            writer.write("\n" + "-".repeat(maxNameUse) + "\t" + "-".repeat(maxCountUse) + "\t" + "-".repeat(maxFilesUse));
-            for (StructInfo info : structs.values().stream()
-                    .filter(info -> info.getUsages() > 0)
-                    .sorted(Comparator.comparing(StructInfo::getName))
-                    .toList()) {
-                writer.write("\n" + String.format(useFormat,
-                        info.getName(), info.getUsages(),
-                        String.join(",", info.getUsageFiles())));
-            }
+    private void writeError(String errorMessage) {
+        String errorPath = config.getProperty("error.file");
+        if (errorPath == null || errorPath.trim().isEmpty()) {
+            ANALYSIS_LOG.warning("error.file not specified in config, logging error to analysis.log only: " + errorMessage);
+            return;
+        }
+        try {
+            Path errorFile = baseOutputDir.resolve(errorPath);
+            Files.createDirectories(errorFile.getParent());
+            Files.write(errorFile, (errorMessage + "\n").getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            ANALYSIS_LOG.severe("Failed to write error to " + errorPath + ": " + e.getMessage());
         }
     }
 
-    static class StructInfo {
-        private final String name;
-        private final Set<String> definitionFiles = new LinkedHashSet<>();
-        private final Set<String> usageFiles = new LinkedHashSet<>();
+    private void generateClasses() throws IOException {
+        String structsTablePath = config.getProperty("output.json");
+        String sourceDir = config.getProperty("source.dirs");
+        Path genDir = baseOutputDir.resolve("generated");
+        Path structsTable = baseOutputDir.resolve(structsTablePath);
+        PojoGenerator generator = new PojoGenerator(genDir, structsTable, sourceDir, Logger.getLogger("org.currierg.Generator"));
+        generator.generate();
+    }
+
+    private static class StructMatch {
+        final String content;
+        final Path file;
+        final int start;
+
+        StructMatch(String content, Path file, int start) {
+            this.content = content;
+            this.file = file;
+            this.start = start;
+        }
+    }
+
+    private static class StructInfo {
+        final String name;
+        final List<String> definitions = new ArrayList<>();
+        final List<String> usages = new ArrayList<>();
 
         StructInfo(String name) {
             this.name = name;
         }
 
-        void addDefinition(String file) {
-            definitionFiles.add(file);
+        void addDefinition(String location) {
+            definitions.add(location);
         }
 
-        void addUsage(String file) {
-            usageFiles.add(file);
-        }
-
-        String getName() {
-            return name;
-        }
-
-        int getDefinitions() {
-            return definitionFiles.size();
-        }
-
-        int getUsages() {
-            return usageFiles.size();
-        }
-
-        Set<String> getDefinitionFiles() {
-            return definitionFiles;
-        }
-
-        Set<String> getUsageFiles() {
-            return usageFiles;
-        }
-
-        Set<String> getFiles() {
-            Set<String> allFiles = new LinkedHashSet<>(definitionFiles);
-            allFiles.addAll(usageFiles);
-            return allFiles;
+        void addUsage(String location) {
+            usages.add(location);
         }
     }
 
-    public static void main(String[] args) throws IOException {
-        if (args.length < 1) {
-            System.err.println("Usage: java -jar StructAnalyzer.jar <config.properties> [--generate-classes]");
-            System.exit(1);
-        }
-        Main main = new Main(args[0]);
-        if (args.length > 1 && "--generate-classes".equals(args[1])) {
-            Path outputDir = Paths.get(main.config.getProperty("output.dir"));
-            String generatedDirName = main.config.getProperty("generated.dir", "generated");
-            Path generatedDir = outputDir.resolve(generatedDirName);
-            Files.createDirectories(generatedDir);
-            Path structsTablePath = outputDir.resolve(main.config.getProperty("output.file"));
-            String sourceDir = main.config.getProperty("source.dirs").split(",")[0]; // Use first dir for now
-            PojoGenerator generator = new PojoGenerator(generatedDir, structsTablePath, sourceDir);
-            generator.generate();
-        } else {
-            main.analyze();
-        }
-    }
-
+//For JDK 1! compatibility
+//    private static class StructMatch {
+//        private final String content;
+//        private final Path file;
+//        private final int start;
+//
+//        StructMatch(String content, Path file, int start) {
+//            this.content = content;
+//            this.file = file;
+//            this.start = start;
+//        }
+//
+//        public String getContent() { return content; }
+//        public Path getFile() { return file; }
+//        public int getStart() { return start; }
+//    }
+//
+//    private static class StructInfo {
+//        private final String name;
+//        private final List<String> definitions = new ArrayList<>();
+//        private final List<String> usages = new ArrayList<>();
+//
+//        StructInfo(String name) {
+//            this.name = name;
+//        }
+//
+//        public String getName() { return name; }
+//        public List<String> getDefinitions() { return definitions; }
+//        public List<String> getUsages() { return usages; }
+//
+//        void addDefinition(String location) {
+//            definitions.add(location);
+//        }
+//
+//        void addUsage(String location) {
+//            usages.add(location);
+//        }
+//    }
 }

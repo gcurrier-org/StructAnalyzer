@@ -23,9 +23,13 @@ empty—no Java files were generated. The build succeeds, so the issue is runtim
 
 ### Repo Access
 
-You have my PAT (shared previously, password: `rep-0315-io`) to push updates to
-`https://github.com/gcurrier-org/StructAnalyzer`. The latest commit is `6b9a32a3d0a20c122a3245b32a63870f1c4b6e3f` (
-2025-03-28T09:40:18Z). I’ll provide a new commit hash after pushing changes from this session.
+The repo is publicly available at: https://github.com/gcurrier-org/StructAnalyzer. Avail yourself of what is there (you
+should be able to read it, even without a PAT)
+
+<tip>
+    <p>The latest commit: `6b9a32a3d0a20c122a3245b32a63870f1c4b6e3f`</p>
+    <p>As of: `2025-03-28T09:40:18Z`</p>
+</tip>
 
 ### Current Files
 
